@@ -1,0 +1,136 @@
+(defmodule s3
+  "An S3-compatible object-storage client — AWS Signature V4 over net/http (rustls
+  https). Works with Tigris, AWS S3, MinIO, Cloudflare R2. Path-style addressing
+  (`<endpoint>/<bucket>/<key>`), which every S3 service accepts and is simplest to sign.
+
+  Build a client with `(s3/client {:endpoint … :region … :access-key … :secret-key …
+  :bucket …})`, then `put-object` / `get-object` / `delete-object` / `head-object`.
+  Object bodies are `bytes` values (byte-faithful). Each op returns `[:ok …]` or
+  `[:error status message]`."
+  (:alias hash)
+  (:alias encoding)
+  (:alias url)
+  (:alias net/http :as http)
+  (:alias datetime :as dt))
+
+;; ---- client -----------------------------------------------------------------
+
+(defn client (opts)
+  "A client config map. Keys: `:endpoint` (base URL, e.g.
+  https://fly.storage.tigris.dev), `:region` (default \"auto\" — Tigris; use the
+  bucket's region for AWS), `:access-key`, `:secret-key`, `:bucket`."
+  {:endpoint (strip-trailing-slash (get opts :endpoint))
+   :host (get (url/parse-url (get opts :endpoint)) :host)
+   :region (get opts :region "auto")
+   :access-key (get opts :access-key)
+   :secret-key (get opts :secret-key)
+   :bucket (get opts :bucket)
+   :service "s3"})
+
+;; ---- object operations ------------------------------------------------------
+
+(defn put-object (client key body content-type)
+  "PUT `body` (a `bytes` value) at `key`. Returns `[:ok status]` or `[:error status msg]`."
+  (status-result (send-request client "PUT" key body content-type)))
+
+(defn get-object (client key)
+  "GET the object at `key`. Returns `[:ok bytes]` or `[:error status msg]`."
+  (let (resp (send-request client "GET" key #b"" nil)
+        status (get resp :status))
+    (if (ok-status? status)
+      [:ok (get resp :body)]
+      [:error status (http/body-text resp)])))
+
+(defn delete-object (client key)
+  "DELETE the object at `key`. Returns `[:ok status]` or `[:error status msg]`
+  (S3 returns 204 for a delete, and success even if the key was absent)."
+  (status-result (send-request client "DELETE" key #b"" nil)))
+
+(defn head-object (client key)
+  "HEAD `key` — `[:ok headers]` if it exists, `[:error status]` otherwise (404 = absent)."
+  (let (resp (send-request client "HEAD" key #b"" nil)
+        status (get resp :status))
+    (if (ok-status? status) [:ok (get resp :headers)] [:error status])))
+
+(defn object-url (client key)
+  "The path-style URL of `key` (for building a public/browser URL)."
+  (str (get client :endpoint) (canonical-uri client key)))
+
+;; ---- request signing (AWS SigV4) --------------------------------------------
+
+(defn send-request (client method key body content-type)
+  "Sign and send an S3 request; returns the net/http response map."
+  (let (payload-hash (if (= (byte-length body) 0) *empty-sha256* (hash/sha256-bytes body))
+        stamps (amz-timestamps)
+        amzdate (get stamps 0)
+        datestamp (get stamps 1)
+        host (get client :host)
+        uri (canonical-uri client key)
+        signed-headers "host;x-amz-content-sha256;x-amz-date"
+        canonical-headers (str "host:"
+                            host "\n" "x-amz-content-sha256:" payload-hash "\n" "x-amz-date:"
+                            amzdate "\n")
+        canonical-request (str method
+                            "\n" uri "\n" "\n" canonical-headers "\n" signed-headers "\n"
+                            payload-hash)
+        scope (str datestamp "/" (get client :region) "/" (get client :service) "/aws4_request")
+        string-to-sign (str "AWS4-HMAC-SHA256\n"
+                         amzdate "\n" scope "\n" (hash/sha256 canonical-request))
+        signing-key (derive-signing-key (get client :secret-key)
+                      datestamp (get client :region) (get client :service))
+        signature (encoding/hex-encode-bytes (hmac signing-key string-to-sign))
+        authorization (str "AWS4-HMAC-SHA256 Credential="
+                        (get client :access-key) "/" scope ", SignedHeaders=" signed-headers
+                        ", Signature=" signature)
+        base {"x-amz-date" amzdate
+              "x-amz-content-sha256" payload-hash
+              "Authorization" authorization}
+        headers (if (and content-type (> (byte-length body) 0))
+                  (assoc base "Content-Type" content-type)
+                  base))
+    (http/http-request method (str (get client :endpoint) uri) {:headers headers :body body})))
+
+;; The canonical request path: `/bucket/key`, each segment percent-encoded (the `/`
+;; separators preserved), which is what S3 signs.
+(defn canonical-uri (client key)
+  (str "/" (get client :bucket) "/" (encode-key key)))
+
+(defn encode-key (key)
+  (join "/" (map url/percent-encode (string-split key "/"))))
+
+(defn derive-signing-key (secret datestamp region service)
+  "The SigV4 signing key: an HMAC chain HMAC(HMAC(HMAC(HMAC(\"AWS4\"+secret, date),
+  region), service), \"aws4_request\"). Returns raw key bytes."
+  (let (k-date (hmac (string->utf8-bytes (str "AWS4" secret)) datestamp)
+        k-region (hmac k-date region)
+        k-service (hmac k-region service)
+        k-signing (hmac k-service "aws4_request"))
+    k-signing))
+
+(defn hmac (key-bytes message)
+  "HMAC-SHA256 of the string `message` under raw `key-bytes`; returns raw bytes."
+  (hash/hmac-sha256-raw key-bytes (string->utf8-bytes message)))
+
+;; ---- helpers ----------------------------------------------------------------
+
+;; sha256 of the empty payload — the x-amz-content-sha256 for a bodyless request.
+(def *empty-sha256* "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+(defn ok-status? (status) (and (>= status 200) (< status 300)))
+
+(defn status-result (resp)
+  (let (status (get resp :status))
+    (if (ok-status? status) [:ok status] [:error status (http/body-text resp)])))
+
+(defn strip-trailing-slash (s)
+  (if (and (string? s) (ends-with? s "/")) (substring s 0 (- (string-length s) 1)) s))
+
+(defn amz-timestamps ()
+  "`[amzdate datestamp]` in SigV4 form: `20260802T101530Z` and `20260802` (UTC now)."
+  (let (d (dt/utc-now)
+        datestamp (str (pad4 (dt/dt-year d)) (pad2 (dt/dt-month d)) (pad2 (dt/dt-day d))))
+    [(str datestamp "T" (pad2 (dt/dt-hour d)) (pad2 (dt/dt-minute d)) (pad2 (dt/dt-second d)) "Z") datestamp]))
+
+(defn pad2 (n) (if (< n 10) (str "0" n) (str n)))
+(defn pad4 (n)
+  (cond (< n 10) (str "000" n) (< n 100) (str "00" n) (< n 1000) (str "0" n) else (str n)))

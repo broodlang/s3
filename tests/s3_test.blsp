@@ -1,0 +1,46 @@
+;; Offline tests for the S3 client: the SigV4 signing-key chain against AWS's own
+;; documented vector, plus the pure helpers. Live PUT/GET is validated against a real
+;; bucket separately (no network here).
+(defmodule s3-test
+  (:use test)
+  (:use s3)
+  (:alias hash)
+  (:alias encoding))
+
+(describe "derive-signing-key (AWS SigV4 documented vector)"
+  ;; From AWS's "deriving the signing key" example — secret/date/region/service fixed,
+  ;; signing key published as hex. Proves the HMAC-SHA256 chain is correct.
+  (test "matches AWS's published signing key"
+    (assert= "f4780e2d9f65fa895f9c67b32ce1baf0b0d8a43505a000a1a9e090d414db404d"
+      (encoding/hex-encode-bytes (derive-signing-key "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
+                                   "20120215" "us-east-1" "iam")))))
+
+(describe "helpers"
+  (test "zero-padding"
+    (assert= "05" (pad2 5))
+    (assert= "12" (pad2 12))
+    (assert= "0007" (pad4 7))
+    (assert= "2026" (pad4 2026)))
+  (test "encode-key preserves slashes, percent-encodes segments"
+    (assert= "clutch/0.1.0.tar.gz" (encode-key "clutch/0.1.0.tar.gz"))
+    (assert= "a%20b/c" (encode-key "a b/c")))
+  (test "strip-trailing-slash"
+    (assert= "https://x.dev" (strip-trailing-slash "https://x.dev/"))
+    (assert= "https://x.dev" (strip-trailing-slash "https://x.dev")))
+  (test "empty-payload sha256 constant is correct"
+    (assert= (hash/sha256 "") *empty-sha256*)))
+
+(describe "client"
+  (test "normalizes endpoint + fills defaults"
+    (let (c (client {:endpoint "https://fly.storage.tigris.dev/"
+                     :access-key "AK"
+                     :secret-key "SK"
+                     :bucket "pkgs"}))
+      (assert= "https://fly.storage.tigris.dev" (get c :endpoint))
+      (assert= "fly.storage.tigris.dev" (get c :host))
+      (assert= "auto" (get c :region))
+      (assert= "s3" (get c :service))))
+  (test "object-url is path-style"
+    (let (c (client {:endpoint "https://fly.storage.tigris.dev" :bucket "pkgs"}))
+      (assert= "https://fly.storage.tigris.dev/pkgs/clutch/0.1.0.tar.gz"
+        (object-url c "clutch/0.1.0.tar.gz")))))
