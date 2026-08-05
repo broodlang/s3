@@ -75,13 +75,24 @@
                             payload-hash)
         scope (str datestamp "/" (get client :region) "/" (get client :service) "/aws4_request")
         string-to-sign (str "AWS4-HMAC-SHA256\n"
-                         amzdate "\n" scope "\n" (hash/sha256 canonical-request))
+                         amzdate
+                         "\n"
+                         scope
+                         "\n"
+                         (hash/sha256 canonical-request))
         signing-key (derive-signing-key (get client :secret-key)
-                      datestamp (get client :region) (get client :service))
+                      datestamp
+                      (get client :region)
+                      (get client :service))
         signature (encoding/hex-encode-bytes (hmac signing-key string-to-sign))
         authorization (str "AWS4-HMAC-SHA256 Credential="
-                        (get client :access-key) "/" scope ", SignedHeaders=" signed-headers
-                        ", Signature=" signature)
+                        (get client :access-key)
+                        "/"
+                        scope
+                        ", SignedHeaders="
+                        signed-headers
+                        ", Signature="
+                        signature)
         base {"x-amz-date" amzdate
               "x-amz-content-sha256" payload-hash
               "Authorization" authorization}
@@ -129,7 +140,8 @@
   "`[amzdate datestamp]` in SigV4 form: `20260802T101530Z` and `20260802` (UTC now)."
   (let (d (dt/utc-now)
         datestamp (str (pad4 (dt/dt-year d)) (pad2 (dt/dt-month d)) (pad2 (dt/dt-day d))))
-    [(str datestamp "T" (pad2 (dt/dt-hour d)) (pad2 (dt/dt-minute d)) (pad2 (dt/dt-second d)) "Z") datestamp]))
+    [(str datestamp "T" (pad2 (dt/dt-hour d)) (pad2 (dt/dt-minute d)) (pad2 (dt/dt-second d)) "Z")
+      datestamp]))
 
 (defn pad2 (n) (if (< n 10) (str "0" n) (str n)))
 (defn pad4 (n)
