@@ -3,6 +3,6 @@
 ;; Pure Brood over net/http (rustls https); no external deps.
 (project
   :name "s3"
-  :version "0.1.1"
+  :version "0.2.0"
   :description "An S3-compatible object-storage client (AWS SigV4) for Tigris/AWS/MinIO/R2."
   :repository "https://github.com/broodlang/s3")
