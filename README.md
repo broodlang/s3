@@ -1,7 +1,7 @@
 # s3
 
 An S3-compatible object-storage client for [Brood](https://broodlang.org) —
-AWS Signature V4 over `net/http` (rustls HTTPS). Works with **Tigris, AWS S3,
+AWS Signature V4 over `http` (rustls HTTPS). Works with **Tigris, AWS S3,
 MinIO, and Cloudflare R2** — anything speaking the S3 API. Pure Brood, no
 external dependencies.
 
