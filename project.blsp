@@ -1,6 +1,6 @@
 ;; s3 — an S3-compatible object-storage client for Brood (AWS Signature V4).
 ;; Works with Tigris, AWS S3, MinIO, Cloudflare R2 — anything speaking the S3 API.
-;; Pure Brood over net/http (rustls https); no external deps.
+;; Pure Brood over http (rustls https); no external deps.
 (project
   :name "s3"
   :version "0.2.3"

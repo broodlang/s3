@@ -1,5 +1,5 @@
 (defmodule s3
-  "An S3-compatible object-storage client — AWS Signature V4 over net/http (rustls
+  "An S3-compatible object-storage client — AWS Signature V4 over http (rustls
   https). Works with Tigris, AWS S3, MinIO, Cloudflare R2. Path-style addressing
   (`<endpoint>/<bucket>/<key>`), which every S3 service accepts and is simplest to sign.
 
@@ -10,7 +10,7 @@
   (:alias hash)
   (:alias encoding)
   (:alias url)
-  (:alias net/http :as http)
+  (:alias http :as http)
   (:alias datetime :as dt))
 
 ;; ---- client -----------------------------------------------------------------
@@ -59,7 +59,7 @@
 ;; ---- request signing (AWS SigV4) --------------------------------------------
 
 (defn send-request (client method key body content-type)
-  "Sign and send an S3 request; returns the net/http response map."
+  "Sign and send an S3 request; returns the http response map."
   (let (payload-hash (if (= (byte-length body) 0) *empty-sha256* (hash/sha256-bytes body))
         stamps (amz-timestamps)
         amzdate (get stamps 0)
