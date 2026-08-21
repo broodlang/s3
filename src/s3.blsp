@@ -99,7 +99,7 @@
         headers (if (and content-type (> (byte-length body) 0))
                   (assoc base "Content-Type" content-type)
                   base))
-    (http/http-request method (str (get client :endpoint) uri) {:headers headers :body body})))
+    (http/request method (str (get client :endpoint) uri) {:headers headers :body body})))
 
 ;; The canonical request path: `/bucket/key`, each segment percent-encoded (the `/`
 ;; separators preserved), which is what S3 signs.
@@ -139,8 +139,8 @@
 (defn amz-timestamps ()
   "`[amzdate datestamp]` in SigV4 form: `20260802T101530Z` and `20260802` (UTC now)."
   (let (d (dt/utc-now)
-        datestamp (str (pad4 (dt/dt-year d)) (pad2 (dt/dt-month d)) (pad2 (dt/dt-day d))))
-    [(str datestamp "T" (pad2 (dt/dt-hour d)) (pad2 (dt/dt-minute d)) (pad2 (dt/dt-second d)) "Z")
+        datestamp (str (pad4 (dt/year d)) (pad2 (dt/month d)) (pad2 (dt/day d))))
+    [(str datestamp "T" (pad2 (dt/hour d)) (pad2 (dt/minute d)) (pad2 (dt/second d)) "Z")
       datestamp]))
 
 (defn pad2 (n) (if (< n 10) (str "0" n) (str n)))
