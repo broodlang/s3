@@ -60,7 +60,7 @@
 
 (defn send-request (client method key body content-type)
   "Sign and send an S3 request; returns the http response map."
-  (let (payload-hash (if (= (byte-length body) 0) *empty-sha256* (hash/sha256-bytes body))
+  (let (payload-hash (if (= (bytes/length body) 0) *empty-sha256* (hash/sha256-bytes body))
         stamps (amz-timestamps)
         amzdate (get stamps 0)
         datestamp (get stamps 1)
@@ -96,7 +96,7 @@
         base {"x-amz-date" amzdate
               "x-amz-content-sha256" payload-hash
               "Authorization" authorization}
-        headers (if (and content-type (> (byte-length body) 0))
+        headers (if (and content-type (> (bytes/length body) 0))
                   (assoc base "Content-Type" content-type)
                   base))
     (http/request method (str (get client :endpoint) uri) {:headers headers :body body})))
@@ -112,7 +112,7 @@
 (defn derive-signing-key (secret datestamp region service)
   "The SigV4 signing key: an HMAC chain HMAC(HMAC(HMAC(HMAC(\"AWS4\"+secret, date),
   region), service), \"aws4_request\"). Returns raw key bytes."
-  (let (k-date (hmac (string->utf8-bytes (str "AWS4" secret)) datestamp)
+  (let (k-date (hmac (string/->bytes (str "AWS4" secret)) datestamp)
         k-region (hmac k-date region)
         k-service (hmac k-region service)
         k-signing (hmac k-service "aws4_request"))
@@ -120,7 +120,7 @@
 
 (defn hmac (key-bytes message)
   "HMAC-SHA256 of the string `message` under raw `key-bytes`; returns raw bytes."
-  (hash/hmac-sha256-raw key-bytes (string->utf8-bytes message)))
+  (hash/hmac-sha256-raw key-bytes (string/->bytes message)))
 
 ;; ---- helpers ----------------------------------------------------------------
 
