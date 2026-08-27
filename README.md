@@ -28,7 +28,7 @@ values. Every operation returns `[:ok …]` or `[:error status message]`.
 Add it to a project with:
 
 ```bash
-nest add s3 :version "^0.3.0"
+nest add s3 :version "^0.4.0"
 ```
 
 ## Publishing
