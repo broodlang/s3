@@ -107,7 +107,7 @@
   (str "/" (get client :bucket) "/" (encode-key key)))
 
 (defn encode-key (key)
-  (string/join "/" (map url/percent-encode (string/split key "/"))))
+  (string/join (map (string/split key "/") url/percent-encode) "/"))
 
 (defn derive-signing-key (secret datestamp region service)
   "The SigV4 signing key: an HMAC chain HMAC(HMAC(HMAC(HMAC(\"AWS4\"+secret, date),
