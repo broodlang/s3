@@ -27,6 +27,17 @@
   (test "strip-trailing-slash"
     (assert= "https://x.dev" (strip-trailing-slash "https://x.dev/"))
     (assert= "https://x.dev" (strip-trailing-slash "https://x.dev")))
+  (test "the canonical query is sorted by name and percent-encoded"
+    (assert= "continuation-token=a%2Fb%3D&list-type=2&prefix=mur%2F1%2F"
+      (canonical-query {"prefix" "mur/1/" "list-type" "2" "continuation-token" "a/b="}))
+    (assert= "" (canonical-query {})))
+  (test "the bucket itself is /bucket"
+    (assert= "/pkgs" (canonical-uri {:bucket "pkgs"} ""))
+    (assert= "/pkgs/a/b" (canonical-uri {:bucket "pkgs"} "a/b")))
+  (test "xml-text reads one element; xml-unescape undoes the entities"
+    (assert= "mur/1/packs/ab" (xml-text "<Contents><Key>mur/1/packs/ab</Key></Contents>" "Key"))
+    (assert= nil (xml-text "<Contents></Contents>" "Key"))
+    (assert= "a&b<c" (xml-unescape "a&amp;b&lt;c")))
   (test "byte-range is inclusive of its last byte"
     (assert= "bytes=0-9" (byte-range 0 10))
     (assert= "bytes=100-100" (byte-range 100 1)))
