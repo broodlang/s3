@@ -27,6 +27,9 @@
   (test "strip-trailing-slash"
     (assert= "https://x.dev" (strip-trailing-slash "https://x.dev/"))
     (assert= "https://x.dev" (strip-trailing-slash "https://x.dev")))
+  (test "byte-range is inclusive of its last byte"
+    (assert= "bytes=0-9" (byte-range 0 10))
+    (assert= "bytes=100-100" (byte-range 100 1)))
   (test "empty-payload sha256 constant is correct"
     (assert= (hash/sha256 "") *empty-sha256*)))
 

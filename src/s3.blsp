@@ -41,6 +41,24 @@
       [:ok (get resp :body)]
       [:error status (http/body-text resp)])))
 
+(defn get-object-range (client key start length)
+  "GET `length` bytes of the object at `key`, starting at byte `start`. Returns `[:ok bytes]`
+  or `[:error status msg]`. A service that ignores `Range` answers 200 with the whole
+  object; the requested slice is cut from it, so the answer is the same either way.
+
+  `Range` is sent outside the signature: SigV4 signs only the headers it names, and every
+  S3 service honours an unsigned `Range`."
+  (let (resp (send-signed client "GET" key #b"" nil {"Range" (byte-range start length)})
+        status (get resp :status))
+    (cond
+      (= status 206) [:ok (get resp :body)]
+      (ok-status? status) [:ok (bytes/slice (get resp :body) start (+ start length))]
+      else [:error status (http/body-text resp)])))
+
+(defn byte-range (start length)
+  "The `Range` header value for `length` bytes from `start` (the end is inclusive)."
+  (str "bytes=" start "-" (- (+ start length) 1)))
+
 (defn delete-object (client key)
   "DELETE the object at `key`. Returns `[:ok status]` or `[:error status msg]`
   (S3 returns 204 for a delete, and success even if the key was absent)."
@@ -60,6 +78,10 @@
 
 (defn send-request (client method key body content-type)
   "Sign and send an S3 request; returns the http response map."
+  (send-signed client method key body content-type {}))
+
+(defn send-signed (client method key body content-type extra-headers)
+  "`send-request`, also sending `extra-headers` (a map), which are left out of the signature."
   (let (payload-hash (if (= (bytes/length body) 0) *empty-sha256* (hash/sha256-bytes body))
         stamps (amz-timestamps)
         amzdate (get stamps 0)
@@ -99,7 +121,9 @@
         headers (if (and content-type (> (bytes/length body) 0))
                   (assoc base "Content-Type" content-type)
                   base))
-    (http/request method (str (get client :endpoint) uri) {:headers headers :body body})))
+    (http/request method
+      (str (get client :endpoint) uri)
+      {:headers (merge extra-headers headers) :body body})))
 
 ;; The canonical request path: `/bucket/key`, each segment percent-encoded (the `/`
 ;; separators preserved), which is what S3 signs.
