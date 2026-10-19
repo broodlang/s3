@@ -53,7 +53,8 @@
         end (+ start length))
     (cond
       (= status 206) [:ok (get resp :body)]
-      (and (ok-status? status) (int? start) (int? end)) [:ok (bytes/slice (get resp :body) start end)]
+      (and (ok-status? status) (int? start) (int? end))
+        [:ok (bytes/slice (get resp :body) start end)]
       else [:error status (http/body-text resp)])))
 
 (defn byte-range (start length)
@@ -72,13 +73,14 @@
         status (get resp :status))
     (if (ok-status? status)
       (let (xml (http/body-text resp))
-        [:ok {:objects (map (rest (string/split xml "<Contents>"))
-                         (fn (entry)
-                           {:key (xml-unescape (xml-text entry "Key"))
-                            :last-modified (xml-text entry "LastModified")}))
-              :next (if (= (xml-text xml "IsTruncated") "true")
-                      (xml-unescape (xml-text xml "NextContinuationToken"))
-                      nil)}])
+        [:ok
+          {:objects (map (rest (string/split xml "<Contents>"))
+                      (fn (entry)
+                        {:key (xml-unescape (xml-text entry "Key"))
+                         :last-modified (xml-text entry "LastModified")}))
+           :next (if (= (xml-text xml "IsTruncated") "true")
+                   (xml-unescape (xml-text xml "NextContinuationToken"))
+                   nil)}])
       [:error status (http/body-text resp)])))
 
 (defn xml-text (xml tag)
@@ -97,10 +99,10 @@
   "XML's five predefined entities back to characters; nil stays nil."
   (if (nil? text)
     nil
-    (string/replace
-      (string/replace
-        (string/replace (string/replace (string/replace text "&lt;" "<") "&gt;" ">") "&quot;" "\"")
-        "&apos;" "'")
+    (string/replace (string/replace (string/replace (string/replace (string/replace text "&lt;" "<")
+                                                      "&gt;" ">")
+                                      "&quot;" "\"")
+                      "&apos;" "'")
       "&amp;" "&")))
 
 (defn delete-object (client key)
@@ -143,8 +145,8 @@
                             host "\n" "x-amz-content-sha256:" payload-hash "\n" "x-amz-date:"
                             amzdate "\n")
         canonical-request (str method
-                            "\n" uri "\n" query-string "\n" canonical-headers "\n" signed-headers "\n"
-                            payload-hash)
+                            "\n" uri "\n" query-string "\n" canonical-headers "\n" signed-headers
+                            "\n" payload-hash)
         scope (str datestamp "/" (get client :region) "/" (get client :service) "/aws4_request")
         string-to-sign (str "AWS4-HMAC-SHA256\n"
                          amzdate
@@ -177,9 +179,9 @@
 
 (defn canonical-query (query)
   "SigV4's canonical query string: `name=value` pairs, percent-encoded, sorted by name."
-  (string/join
-    (map (sort (map (keys query) str))
-      (fn (name) (str (url/percent-encode name) "=" (url/percent-encode (str (get query name))))))
+  (string/join (map (sort (map (keys query) str))
+                 (fn (name)
+                   (str (url/percent-encode name) "=" (url/percent-encode (str (get query name))))))
     "&"))
 
 ;; The canonical request path: `/bucket/key`, each segment percent-encoded (the `/`
