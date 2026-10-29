@@ -11,16 +11,14 @@ values. Every operation returns `[:ok …]` or `[:error status message]`.
 
 ## Usage
 
-```brood
-(:alias s3)
-
+```brood fragment
 (let (client (s3/client {:endpoint "https://fly.storage.tigris.dev"
                          :region "auto"
-                         :access-key (env "AWS_ACCESS_KEY_ID")
-                         :secret-key (env "AWS_SECRET_ACCESS_KEY")
+                         :access-key (os/env "AWS_ACCESS_KEY_ID")
+                         :secret-key (os/env "AWS_SECRET_ACCESS_KEY")
                          :bucket "my-bucket"}))
-  (s3/put-object client "hello.txt" (str->bytes "hi") "text/plain")
-  (s3/get-object client "hello.txt")      ; => [:ok #bytes …]
+  (s3/put-object client "hello.txt" (string/->bytes "hi") "text/plain")
+  (s3/get-object client "hello.txt")      ; => [:ok #b"hi"]
   (s3/head-object client "hello.txt")
   (s3/delete-object client "hello.txt"))
 ```
