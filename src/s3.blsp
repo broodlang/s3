@@ -6,7 +6,7 @@
   Build a client with `(s3/client {:endpoint … :region … :access-key … :secret-key …
   :bucket …})`, then `put-object` / `get-object` / `delete-object` / `head-object`.
   Object bodies are `bytes` values (byte-faithful). Each op returns `[:ok …]` or
-  `[:error status message]`."
+  `[:error status message]`, status 0 when no response came back at all."
   (:alias hash)
   (:alias encoding)
   (:alias url)
@@ -20,7 +20,7 @@
   https://fly.storage.tigris.dev), `:region` (default \"auto\" — Tigris; use the
   bucket's region for AWS), `:access-key`, `:secret-key`, `:bucket`."
   {:endpoint (strip-trailing-slash (get opts :endpoint))
-   :host (get (url/parse-url (get opts :endpoint)) :host)
+   :host (get (url/parse (get opts :endpoint)) :host)
    :region (get opts :region "auto")
    :access-key (get opts :access-key)
    :secret-key (get opts :secret-key)
@@ -35,11 +35,11 @@
 
 (defn get-object (client key)
   "GET the object at `key`. Returns `[:ok bytes]` or `[:error status msg]`."
-  (let (resp (send-request client "GET" key #b"" nil)
-        status (get resp :status))
-    (if (ok-status? status)
-      [:ok (get resp :body)]
-      [:error status (http/body-text resp)])))
+  (let (resp (send-request client "GET" key #b"" nil))
+    (cond
+      (failure? resp) (transport-error resp)
+      (ok-status? (get resp :status)) [:ok (get resp :body)]
+      else [:error (get resp :status) (http/body-text resp)])))
 
 (defn get-object-range (client key start length)
   "GET `length` bytes of the object at `key`, starting at byte `start`. Returns `[:ok bytes]`
@@ -49,9 +49,10 @@
   `Range` is sent outside the signature: SigV4 signs only the headers it names, and every
   S3 service honours an unsigned `Range`."
   (let (resp (send-signed client "GET" key #b"" nil {"Range" (byte-range start length)})
-        status (get resp :status)
+        status (if (failure? resp) nil (get resp :status))
         end (+ start length))
     (cond
+      (failure? resp) (transport-error resp)
       (= status 206) [:ok (get resp :body)]
       (and (ok-status? status) (int? start) (int? end))
         [:ok (bytes/slice (get resp :body) start end)]
@@ -69,19 +70,20 @@
   (let (query (if (nil? continuation)
                 {"list-type" "2" "prefix" prefix}
                 {"list-type" "2" "prefix" prefix "continuation-token" continuation})
-        resp (send-query client "GET" "" query #b"" nil {})
-        status (get resp :status))
-    (if (ok-status? status)
-      (let (xml (http/body-text resp))
-        [:ok
-          {:objects (map (rest (string/split xml "<Contents>"))
-                      (fn (entry)
-                        {:key (xml-unescape (xml-text entry "Key"))
-                         :last-modified (xml-text entry "LastModified")}))
-           :next (if (= (xml-text xml "IsTruncated") "true")
-                   (xml-unescape (xml-text xml "NextContinuationToken"))
-                   nil)}])
-      [:error status (http/body-text resp)])))
+        resp (send-query client "GET" "" query #b"" nil {}))
+    (cond
+      (failure? resp) (transport-error resp)
+      (ok-status? (get resp :status))
+        (let (xml (http/body-text resp))
+          [:ok
+            {:objects (map (rest (string/split xml "<Contents>"))
+                        (fn (entry)
+                          {:key (xml-unescape (xml-text entry "Key"))
+                           :last-modified (xml-text entry "LastModified")}))
+             :next (if (= (xml-text xml "IsTruncated") "true")
+                     (xml-unescape (xml-text xml "NextContinuationToken"))
+                     nil)}])
+      else [:error (get resp :status) (http/body-text resp)])))
 
 (defn xml-text (xml tag)
   "The text of the first `<tag>…</tag>` in `xml`, or nil. Enough for S3's flat listings,
@@ -112,9 +114,11 @@
 
 (defn head-object (client key)
   "HEAD `key` — `[:ok headers]` if it exists, `[:error status]` otherwise (404 = absent)."
-  (let (resp (send-request client "HEAD" key #b"" nil)
-        status (get resp :status))
-    (if (ok-status? status) [:ok (get resp :headers)] [:error status])))
+  (let (resp (send-request client "HEAD" key #b"" nil))
+    (cond
+      (failure? resp) (transport-error resp)
+      (ok-status? (get resp :status)) [:ok (get resp :headers)]
+      else [:error (get resp :status)])))
 
 (defn object-url (client key)
   "The path-style URL of `key` (for building a public/browser URL)."
@@ -133,7 +137,7 @@
 (defn send-query (client method key query body content-type extra-headers)
   "`send-signed` with a query string: `query` a map of parameter names to values, signed in
   SigV4's canonical form (names sorted, names and values percent-encoded)."
-  (let (payload-hash (if (= (bytes/length body) 0) *empty-sha256* (hash/sha256-bytes body))
+  (let (payload-hash (if (= (count body) 0) *empty-sha256* (hash/sha256-bytes body))
         stamps (amz-timestamps)
         amzdate (get stamps 0)
         datestamp (get stamps 1)
@@ -170,7 +174,7 @@
         base {"x-amz-date" amzdate
               "x-amz-content-sha256" payload-hash
               "Authorization" authorization}
-        headers (if (and content-type (> (bytes/length body) 0))
+        headers (if (and content-type (> (count body) 0))
                   (assoc base "Content-Type" content-type)
                   base))
     (http/request method
@@ -216,11 +220,19 @@
 (defn ok-status? (status) (and (>= status 200) (< status 300)))
 
 (defn status-result (resp)
-  (let (status (get resp :status))
-    (if (ok-status? status) [:ok status] [:error status (http/body-text resp)])))
+  (cond
+    (failure? resp) (transport-error resp)
+    (ok-status? (get resp :status)) [:ok (get resp :status)]
+    else [:error (get resp :status) (http/body-text resp)]))
+
+(defn transport-error (f)
+  "`[:error 0 message]` for a request that got no response at all — `http/request`'s failure
+  for a refused connection, a dropped read or a timeout — so every operation keeps its
+  `[:error status msg]` shape."
+  [:error 0 (error-message f)])
 
 (defn strip-trailing-slash (s)
-  (if (and (string? s) (string/ends-with? s "/")) (string/substring s 0 (- (string/length s) 1)) s))
+  (if (and (string? s) (string/ends-with? s "/")) (string/substring s 0 (- (count s) 1)) s))
 
 (defn amz-timestamps ()
   "`[amzdate datestamp]` in SigV4 form: `20260802T101530Z` and `20260802` (UTC now)."

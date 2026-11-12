@@ -58,3 +58,20 @@
     (let (c (client {:endpoint "https://fly.storage.tigris.dev" :bucket "pkgs"}))
       (assert= "https://fly.storage.tigris.dev/pkgs/clutch/0.1.0.tar.gz"
         (object-url c "clutch/0.1.0.tar.gz")))))
+
+(describe "no response"
+  ;; Nothing listens on port 1, so every request fails in transport. `http/request` answers
+  ;; that with a failure rather than a response map; each operation keeps its documented
+  ;; `[:error status msg]` shape, with status 0.
+  (test "every operation answers [:error 0 msg] when the endpoint refuses the connection"
+    (let (c (client {:endpoint "http://127.0.0.1:1" :access-key "AK" :secret-key "SK" :bucket "b"}))
+      (each [(get-object c "k")
+              (get-object-range c "k" 0 4)
+              (put-object c "k" #b"x" "text/plain")
+              (delete-object c "k")
+              (list-objects c "" nil)]
+        (fn (result)
+          (assert= :error (get result 0))
+          (assert= 0 (get result 1))
+          (assert (string? (get result 2)))))
+      (let (head (head-object c "k")) (assert= [:error 0] [(get head 0) (get head 1)])))))
