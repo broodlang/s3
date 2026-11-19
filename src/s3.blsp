@@ -232,7 +232,7 @@
   [:error 0 (error-message f)])
 
 (defn strip-trailing-slash (s)
-  (if (and (string? s) (string/ends-with? s "/")) (string/substring s 0 (- (count s) 1)) s))
+  (match s ((str path "/") path) (_ s)))
 
 (defn amz-timestamps ()
   "`[amzdate datestamp]` in SigV4 form: `20260802T101530Z` and `20260802` (UTC now)."
